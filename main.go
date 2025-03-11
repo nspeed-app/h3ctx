@@ -403,9 +403,9 @@ func Download(ctx context.Context, url string, httpVersion int, ipVersion int) e
 
 			timedOut = "client timeout"
 		}
-		if err != nil {
-			return err
-		}
+		// if err != nil {
+		// 	return err
+		// }
 		fmt.Printf("client received %d bytes in %v = %s, %d write ops, %d buff (timeout: %s)\n", wm.TotalRead, wm.ElapsedTime, FormatBitperSecond(wm.ElapsedTime.Seconds(), wm.TotalRead), wm.ReadCount, wm.StepSize, timedOut)
 	}
 	return err
@@ -523,7 +523,7 @@ var optSTimeout = flag.Duration("st", 0, "server timeout (in golang duration)")
 var optIPv4 = flag.Bool("4", false, "force IPv4")
 var optIPv6 = flag.Bool("6", false, "force IPv6")
 
-var optNoGSO = flag.Bool("nogso", false, "disable GSO (broken with quic-go v0.38.0)")
+var optNoGSO = flag.Bool("nogso", false, "disable GSO (broken with quic-go v0.38.0, work around: set QUIC_GO_DISABLE_GSO=true env var before calling this program)")
 
 func main() {
 
