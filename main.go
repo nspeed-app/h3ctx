@@ -43,6 +43,7 @@ import (
 // locally or over the wire. you can also use the same program as a remote client with the "-c url" option
 // use the "-t duration" to limit the test duration from the client side (which is on at 8 seconds by default)
 // use the "-st duration" to limit the test duration from the server side.
+// april 2025: since https://github.com/tailscale/tailscale/issues/2633 , use -mtu 1200 to workaround
 // see "-h" also for more help.
 
 // build a 1MiB buffer of random data
@@ -233,6 +234,10 @@ func createServer(ctx context.Context, host string, port int, ipVersion int, wg 
 		TLSConfig: serverTlsConfig,
 	}
 	quicConf := &quic.Config{}
+	if *optMTU > 0 {
+		quicConf.InitialPacketSize = 1200
+	}
+
 	quicServer := &http3.Server{
 		Addr:       listenAddr,
 		TLSConfig:  serverTlsConfig,
@@ -341,11 +346,15 @@ func Download(ctx context.Context, url string, httpVersion int, ipVersion int) e
 			}
 		}()
 
+		quicConf := &quic.Config{
+			Tracer: tracer,
+		}
+		if *optMTU > 0 {
+			quicConf.InitialPacketSize = 1200
+		}
 		rt = &http3.Transport{
 			TLSClientConfig: tlsClientConfig,
-			QUICConfig: &quic.Config{
-				Tracer: tracer,
-			},
+			QUICConfig:      quicConf,
 			Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 				// this dialer respect ipv6/ipv4 preference
 				network := "udp"
@@ -528,6 +537,7 @@ var optIPv4 = flag.Bool("4", false, "force IPv4")
 var optIPv6 = flag.Bool("6", false, "force IPv6")
 
 var optNoGSO = flag.Bool("nogso", false, "disable GSO (broken with quic-go v0.38.0, work around: set QUIC_GO_DISABLE_GSO=true env var before calling this program)")
+var optMTU = flag.Uint("mtu", 0, "set InitialPacketSize (min 1200)")
 
 func main() {
 
@@ -553,6 +563,11 @@ func main() {
 		ipVersion = 6
 	}
 
+	if *optMTU > 0 {
+		if *optMTU < 1200 {
+			log.Fatal("mtu can't be below 1200")
+		}
+	}
 	if *optCpuProfile != "" {
 		runtime.SetBlockProfileRate(1)
 		f, err := os.Create(*optCpuProfile)
