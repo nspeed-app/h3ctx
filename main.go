@@ -30,7 +30,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/quic-go/quic-go"
+	quicgo "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/quic-go/quic-go/logging"
 	"golang.org/x/net/http2"
@@ -233,9 +233,9 @@ func createServer(ctx context.Context, host string, port int, ipVersion int, wg 
 		Handler:   createHandler(),
 		TLSConfig: serverTlsConfig,
 	}
-	quicConf := &quic.Config{}
+	quicConf := &quicgo.Config{}
 	if *optMTU > 0 {
-		quicConf.InitialPacketSize = 1200
+		quicConf.InitialPacketSize = uint16(*optMTU)
 	}
 
 	quicServer := &http3.Server{
@@ -337,7 +337,7 @@ func Download(ctx context.Context, url string, httpVersion int, ipVersion int) e
 
 	if httpVersion == 3 {
 		// with use http3.RoundTripper but it doesnt expose its quic.Transport member field so we must use our own
-		var qTransport *quic.Transport
+		var qTransport *quicgo.Transport
 		defer func() {
 			if qTransport != nil {
 				fmt.Println("closing local quic transport")
@@ -346,16 +346,16 @@ func Download(ctx context.Context, url string, httpVersion int, ipVersion int) e
 			}
 		}()
 
-		quicConf := &quic.Config{
+		quicConf := &quicgo.Config{
 			Tracer: tracer,
 		}
 		if *optMTU > 0 {
-			quicConf.InitialPacketSize = 1200
+			quicConf.InitialPacketSize = uint16(*optMTU)
 		}
 		rt = &http3.Transport{
 			TLSClientConfig: tlsClientConfig,
 			QUICConfig:      quicConf,
-			Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+			Dial: func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quicgo.Config) (quicgo.EarlyConnection, error) {
 				// this dialer respect ipv6/ipv4 preference
 				network := "udp"
 				udpAddr, err := netTransport.DialContext(ctx, network, addr)
@@ -368,7 +368,7 @@ func Download(ctx context.Context, url string, httpVersion int, ipVersion int) e
 					if err != nil {
 						return nil, err
 					}
-					qTransport = &quic.Transport{Conn: udpConn}
+					qTransport = &quicgo.Transport{Conn: udpConn}
 				}
 				// use same dialer as other http version
 
@@ -479,13 +479,13 @@ func fixH2H3Errors(source string, err error) error {
 	*/
 
 	// http/3 client : context.DeadlineExceeded returns a quic.StreamError with ErrorCode == 0x10c
-	var qerr *quic.StreamError
+	var qerr *quicgo.StreamError
 	if errors.As(err, &qerr) {
-		if qerr.ErrorCode == quic.StreamErrorCode(http3.ErrCodeRequestCanceled) {
+		if qerr.ErrorCode == quicgo.StreamErrorCode(http3.ErrCodeRequestCanceled) {
 			// change error to context timeout
 			return context.DeadlineExceeded
 		}
-		fmt.Println("quic.ErrorCode = ", reflect.TypeOf(err))
+		fmt.Println("quicgo.ErrorCode = ", reflect.TypeOf(err))
 	}
 	// http/2 server timeout return: "stream error: stream ID x; INTERNAL_ERROR; received from peer"
 	if h2err, ok := err.(http2.StreamError); ok {
@@ -791,7 +791,7 @@ func generateTLSConfig() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, 
 	return
 }
 
-func tracer(ctx context.Context, p logging.Perspective, ci quic.ConnectionID) *logging.ConnectionTracer {
+func tracer(ctx context.Context, p logging.Perspective, ci quicgo.ConnectionID) *logging.ConnectionTracer {
 	return &logging.ConnectionTracer{
 		StartedConnection: func(local, remote net.Addr, srcConnID, destConnID logging.ConnectionID) {
 			fmt.Println("  connected to", remote)
