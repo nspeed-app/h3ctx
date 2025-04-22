@@ -262,7 +262,7 @@ func createServer(ctx context.Context, host string, port int, ipVersion int, wg 
 	}
 	udpAddr, err := net.ResolveUDPAddr(networkUDP, quicServer.Addr)
 	if err != nil {
-		log.Fatalf("cannot ResolveUDPAddr %s: %s", server.Addr, err)
+		log.Fatalf("cannot ResolveUDPAddr %s: %s", quicServer.Addr, err)
 	}
 	ln3, err := net.ListenUDP(networkUDP, udpAddr)
 	if err != nil {
@@ -274,7 +274,8 @@ func createServer(ctx context.Context, host string, port int, ipVersion int, wg 
 		fmt.Printf("server %s shuting down\n", listenAddr)
 		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		defer cancel()
-		server.Shutdown(ctx)
+		_ = server.Shutdown(ctx)
+		_ = quicServer.Shutdown(ctx)
 	}()
 
 	// signal the server is listening (so client(s) can start)
@@ -283,13 +284,16 @@ func createServer(ctx context.Context, host string, port int, ipVersion int, wg 
 	fmt.Printf("server listening at %s (tcp) and %s (udp)\n", ln.Addr().String(), ln3.LocalAddr().String())
 	//spawn h3 (yeah this is not a clean way to do this...)
 	go func() {
-		quicServer.Serve(ln3)
+		err := quicServer.Serve(ln3)
+		if err != nil {
+			log.Fatalf("cannot serve http3 %s: %s", ln3.LocalAddr().String(), err)
+		}
 	}()
 	// wait on h2
 	err = server.ServeTLS(ln, "", "")
 
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("cannot serve %s: %s", server.Addr, err)
+		log.Fatalf("cannot serve http %s: %s", server.Addr, err)
 	}
 }
 
@@ -532,9 +536,13 @@ func main() {
 
 	// doesn't work anymore. quic-go check for env var in an init() function so too late to set it here
 	if *optNoGSO {
-		fmt.Println("disabling GSO")
+		fmt.Println("disabling GSO (not working , set QUIC_GO_DISABLE_GSO=true env var before calling this program)")
 		os.Setenv("QUIC_GO_DISABLE_GSO", "true")
 	}
+	if os.Getenv("QUIC_GO_DISABLE_GSO") == "true" {
+		fmt.Println("GSO disabled")
+	}
+
 	if *optIPv4 && *optIPv6 {
 		log.Fatal("cant force both IPv4 and IPv6")
 	}
@@ -582,7 +590,7 @@ func main() {
 		if *optH3 {
 			httpVersion = 3
 		}
-		doClient(ctx, *optClient, httpVersion, *optTimeout, ipVersion)
+		_ = doClient(ctx, *optClient, httpVersion, *optTimeout, ipVersion)
 		return
 	}
 	hostname := "localhost"
@@ -595,15 +603,15 @@ func main() {
 		url += "?timeout=" + (*optSTimeout).String()
 	}
 	if !*optNoH1 {
-		doClient(ctx, url, 1, *optTimeout, ipVersion)
+		_ = doClient(ctx, url, 1, *optTimeout, ipVersion)
 		fmt.Println()
 	}
 	if !*optNoH2 {
-		doClient(ctx, url, 2, *optTimeout, ipVersion)
+		_ = doClient(ctx, url, 2, *optTimeout, ipVersion)
 		fmt.Println()
 	}
 	if !*optNoH3 {
-		doClient(ctx, url, 3, *optTimeout, ipVersion)
+		_ = doClient(ctx, url, 3, *optTimeout, ipVersion)
 		fmt.Println()
 	}
 	cancel()
@@ -685,16 +693,22 @@ func generateTLSConfig() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, 
 
 	// pem encode
 	caPEM := new(bytes.Buffer)
-	pem.Encode(caPEM, &pem.Block{
+	err = pem.Encode(caPEM, &pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: caBytes,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	caPrivKeyPEM := new(bytes.Buffer)
-	pem.Encode(caPrivKeyPEM, &pem.Block{
+	err = pem.Encode(caPrivKeyPEM, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(caPrivKey),
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// set up our server certificate
 	cert := &x509.Certificate{
@@ -727,10 +741,13 @@ func generateTLSConfig() (serverTLSConf *tls.Config, clientTLSConf *tls.Config, 
 	}
 
 	certPEM := new(bytes.Buffer)
-	pem.Encode(certPEM, &pem.Block{
+	err = pem.Encode(certPEM, &pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: certBytes,
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 
 	certPrivKeyPEM := new(bytes.Buffer)
 	pem.Encode(certPrivKeyPEM, &pem.Block{
